@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Dispatch without changing the invocation directory or interpreting path bytes.
+
+die() {
+    printf 'sourcediff: %s\n' "$1" >&2
+    exit 2
+}
+
+engine=python
+args=()
+filter_chain=false
+forward_engine=false
+while (( $# )); do
+    case $1 in
+        --)
+            args+=("$@")
+            break
+            ;;
+        --engine|--engine=*)
+            if [[ $1 == --engine ]]; then
+                (( $# >= 2 )) || die '--engine requires python or bash'
+                engine=$2
+                shift
+            else
+                engine=${1#*=}
+            fi
+            case $engine in
+                python|bash) ;;
+                *) die '--engine requires python or bash' ;;
+            esac
+            # Removing this option must not join a filter chain to a later
+            # positional. Keep subsequent selectors too, so the final one wins.
+            if [[ $filter_chain == true || $forward_engine == true ]]; then
+                forward_engine=true
+                args+=("--engine=$engine")
+            fi
+            filter_chain=false
+            ;;
+        --exclude-dir|--exclude-ext)
+            args+=("$1")
+            filter_chain=true
+            ;;
+        --output|--hash|--jobs|--max-depth|--exclude|--symlinks|--log-file)
+            filter_chain=false
+            args+=("$1")
+            if (( $# >= 2 )); then
+                args+=("$2")
+                shift
+            fi
+            ;;
+        *)
+            args+=("$1")
+            if [[ $1 == -* && $1 != - && ! $1 =~ ^-([0-9]+|[0-9]*\.[0-9]+)$ ]]; then
+                filter_chain=false
+            fi
+            ;;
+    esac
+    shift
+done
+
+command -v readlink >/dev/null 2>&1 || die 'GNU readlink is required to locate the installation'
+IFS= read -r -d '' launcher < <(readlink -fz -- "${BASH_SOURCE[0]}" 2>/dev/null) ||
+    die 'could not locate the installation; GNU readlink with -f and -z is required'
+install_dir=${launcher%/*}
+shopt -s execfail
+
+if [[ $engine == bash ]]; then
+    entry=$install_dir/lib/bash/main.sh
+    [[ -r $entry ]] || die 'Bash engine is missing from the installation'
+    exec "$BASH" "$entry" "${args[@]}" || die 'could not start the Bash engine'
+fi
+
+command -v python3 >/dev/null 2>&1 || die 'python3 (3.8 or later) is required for the Python engine'
+[[ -r $install_dir/lib/sourcediff_py/cli.py ]] || die 'Python engine is missing from the installation'
+exec python3 -B -c '
+import sys
+if sys.version_info < (3, 8):
+    print("sourcediff: python3 must be version 3.8 or later", file=sys.stderr)
+    sys.exit(2)
+sys.path[0] = sys.argv[1]
+try:
+    from sourcediff_py.cli import main
+    status = main(sys.argv[2:])
+except ModuleNotFoundError as error:
+    print(f"sourcediff: incomplete Python engine installation (missing module {error.name})", file=sys.stderr)
+    sys.exit(2)
+sys.exit(status)
+' "$install_dir/lib" "${args[@]}" || die 'could not start python3'
