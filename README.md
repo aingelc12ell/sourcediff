@@ -174,7 +174,7 @@ categories remain inherited.
 Effective scope applies to both baseline and target, avoiding false missing
 entries when narrowing scope. Widening scope can reveal added target entries
 that the old catalog did not cover; these still count as discrepancies. The
-report identifies potentially broader coverage and explicit overrides. A
+default report identifies potentially broader coverage and explicit overrides. A
 follow-mode catalog cannot recover which paths originally came through links;
 changing symlink policy can therefore change types and coverage by policy alone.
 
